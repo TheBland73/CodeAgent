@@ -1,19 +1,26 @@
 """
 pytest 公共配置。
 
-做三件事：
-1. 把仓库根目录加入 sys.path，保证在任何工作目录下都能 import core；
-2. 把写盘日志重定向到临时目录，避免跑一次测试就往仓库的 .agent_log/ 里塞
+做四件事：
+1. 注入一个占位 API Key：core.config 在导入时就会校验 DEEPSEEK_API_KEY，
+   缺失直接抛 ValueError。CI 里没有 .env（也不会提交 .env），不注入的话
+   3 个测试模块会在"收集阶段"就报错。占位 Key 只用于导入，测试全程不联网。
+2. 把仓库根目录加入 sys.path，保证在任何工作目录下都能 import core；
+3. 把写盘日志重定向到临时目录，避免跑一次测试就往仓库的 .agent_log/ 里塞
    一堆 pytest 临时路径的记录（日志是运行产物，不该由测试产生）；
-3. 把 pytest 的 basetemp 钉在仓库内的临时目录：某些环境里子进程解析出的
+4. 把 pytest 的 basetemp 钉在仓库内的临时目录：某些环境里子进程解析出的
    系统临时目录不可写，pytest 会退回"当前目录/pytest-of-<用户名>"，在项目里留垃圾。
 """
 
+import os
 import shutil
 import sys
 from pathlib import Path
 
 import pytest
+
+# 必须在导入 core.* 之前注入：core.config 导入时就会读它
+os.environ.setdefault("DEEPSEEK_API_KEY", "sk-test-placeholder-not-a-real-key")
 
 # 把仓库根目录（core/ 的父目录）加入 sys.path
 ROOT = Path(__file__).resolve().parent
