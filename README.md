@@ -3,6 +3,8 @@
 > 一个基于 **DeepSeek** 的代码生成 / 代码修改 Agent：它会自己决定去读哪些文件、搜哪些关键字，
 > 信息够了再动手改代码。**每一次写盘前都会先给你看 diff，你点 `y` 才落盘，并且自动留备份与日志。**
 
+[![tests](https://github.com/TheBland73/CodeAgent/workflows/tests/badge.svg)](https://github.com/TheBland73/CodeAgent/actions/workflows/test.yml)
+
 作者：TheBland ｜ 语言：Python 3.9+ ｜ 交互方式：命令行（CLI）
 
 ---
