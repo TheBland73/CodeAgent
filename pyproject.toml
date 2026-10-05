@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codeagent"
+version = "0.1.0"
+description = "基于 DeepSeek 的 CLI 代码补全 Agent（Agent 循环 + 工具调用 + 人工确认）"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "openai>=3.0",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+# 离线单元测试用；核心功能不依赖它
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+# 安装后可直接执行 codeagent（等价于 python main.py）
+codeagent = "core.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["core*", "test*"]
+
+[tool.pytest.ini_options]
+# 只自动收集离线单元测试；test/ 下的手动脚本（需要真实 API / 交互输入）
+# 命名为 test_api.py、test_tools.py 等，不匹配 test_unit_*.py，所以不会被收集。
+python_files = ["test_unit_*.py"]
+testpaths = ["test"]
+addopts = "-q"

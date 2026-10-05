@@ -1,0 +1,14 @@
+# 开发/测试依赖
+#
+# 安装（先装运行依赖，再装这个）：
+#     python -m pip install -r requirements.txt
+#     python -m pip install -r requirements-dev.txt
+#
+# 或者用 pyproject.toml 里声明好的 extra：
+#     python -m pip install -e ".[dev]"
+
+pytest==9.1.1
+colorama==0.4.6
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0

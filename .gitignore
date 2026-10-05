@@ -1,0 +1,55 @@
+# ===== 环境变量与密钥（绝对不要提交）=====
+.env
+.env.local
+.env.*.local
+
+# ===== Python 虚拟环境 =====
+.venv/
+venv/
+venv2/
+env/
+ENV/
+
+# ===== Python 缓存与构建产物 =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+pytest-of-*/
+pip-*/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ===== 编辑器与 IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ===== 操作系统文件 =====
+.DS_Store
+Thumbs.db
+
+# ===== Agent 运行时产物 =====
+# 自动备份文件（*_make_backup 生成，如 sample.py.bak）
+*.bak
+# 修改日志目录（core/tools.py 的 LOG_DIR，注意是 .agent_log 不是 .agent_logs）
+.agent_log/
+.agent_logs/
+
+# ===== 手动验证脚本的临时产物 =====
+# test/ 下的 demo 脚本会就地生成这些样本文件与备份，
+# 属于"跑一次就变"的中间状态，不要提交（否则每次运行都产生 diff）
+test/check_insert_demo.py
+test/test_edit_sample.py
+test/test_insert_sample.py
+test/test_diff_sample.py
+test/test_confirm_sample.py
+test/test_log_sample.py
+test/*.bak
