@@ -32,6 +32,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # GitHub 的测试镜像默认没有 ripgrep（只有 macOS 自带），装上才能真跑搜索路径
+      - name: 安装 ripgrep (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: 安装 ripgrep (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ripgrep --no-progress -y --force
+        shell: pwsh
+
       - name: 运行离线单元测试
         # 全部用例都不依赖网络与 API Key，可在 CI 中安全执行
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python -m pytest -q
+
+      # 再跑一遍"没装 ripgrep"的情形：search_code 的内置搜索兜底也必须通过
+      - name: 运行离线单元测试（模拟没有 ripgrep 的环境）
+        env:
+          PYTHONIOENCODING: utf-8
+          CODEAGENT_FORCE_PYTHON_SEARCH: "1"
         run: python -m pytest -q

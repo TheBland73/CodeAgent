@@ -53,3 +53,8 @@ test/test_diff_sample.py
 test/test_confirm_sample.py
 test/test_log_sample.py
 test/*.bak
+
+# ===== pytest 运行时产物 =====
+# pyproject.toml 把 cache_dir 固定到这里；conftest.py 还会把测试期间的
+# 写盘日志也重定向进来，避免测试污染仓库里的 .agent_log/
+_pytest-tmp/

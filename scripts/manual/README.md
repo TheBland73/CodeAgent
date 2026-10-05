@@ -72,6 +72,6 @@ python scripts\manual\test_insert.py
 ## 提示
 
 - 这些脚本是**开发过程中的手工观察工具**，输出以人眼判读为主，不做断言。若要做回归防护，
-  请把发现的问题沉淀成 `test/test_unit_*.py` 里的一条断言 —— 这正是本项目 36 条离线用例的来源。
+  请把发现的问题沉淀成 `test/test_unit_*.py` 里的一条断言 —— 这正是本项目 48 条离线用例的来源。
 - 跑完脚本后如果 `git status` 出现 `*.bak` 或临时文件，直接删掉即可；`.gitignore` 已忽略
   `*.bak` 与 `.agent_log/`，它们不会误入版本库。

@@ -2,18 +2,21 @@
 代码补全 Agent 的工具集。
 
 当前提供两个工具：
-    - search_code(query, path, ...): 用 ripgrep 搜索代码
+    - search_code(query, path, ...): 搜索代码（优先 ripgrep，无 rg 时用内置搜索兜底）
     - read_file(path, ...): 读取文件内容
 """
 #.\venv2\Scripts\Activate.ps1
 
+import fnmatch
 import json
 import difflib
+import os
+import re
 import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, List, Optional
 from core.cache import search_cache
 
 # 日志目录
@@ -27,8 +30,136 @@ LOG_CONTENT_LIMIT = 2000
 # ============================================================
 
 def _find_rg() -> Optional[str]:
-    """查找 ripgrep 可执行文件。"""
+    """
+    查找 ripgrep 可执行文件。
+
+    设置环境变量 CODEAGENT_FORCE_PYTHON_SEARCH=1 可强制返回 None，
+    用于在 CI 上验证内置搜索兜底这条路径（见 .github/workflows/test.yml）。
+    """
+    if os.getenv("CODEAGENT_FORCE_PYTHON_SEARCH", "").strip().lower() in ("1", "true", "yes"):
+        return None
     return shutil.which("rg")
+
+
+# 无 ripgrep 时的兜底搜索：这些目录不进去（体积大且没有检索价值）
+_SEARCH_SKIP_DIRS = {
+    ".git", ".hg", ".svn", ".tox", ".mypy_cache", ".pytest_cache",
+    "__pycache__", "node_modules", "venv", "venv2", ".venv", "env",
+}
+
+
+def _iter_search_files(root: Path) -> Iterator[Path]:
+    """
+    遍历待搜索的文件：跳过隐藏目录与常见依赖/缓存目录。
+
+    Args:
+        root: 搜索起点（目录或单个文件）
+
+    Yields:
+        文件路径
+    """
+    if root.is_file():
+        yield root
+        return
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        # 原地修改 dirnames 才能让 os.walk 跳过整个子树
+        dirnames[:] = [d for d in dirnames if d not in _SEARCH_SKIP_DIRS]
+        for name in filenames:
+            yield Path(dirpath) / name
+
+
+def _match_glob(rel_posix: str, name: str, file_glob: Optional[str]) -> bool:
+    """
+    判断文件是否命中 --glob 过滤，语义与 ripgrep 对齐：
+    以 '!' 开头表示排除，其余为包含；不含 '/' 的模式匹配文件名（任意层级），
+    含 '/' 的模式匹配相对路径，例如 'core/*.py'。
+    """
+    if not file_glob:
+        return True
+
+    negate = file_glob.startswith("!")
+    pattern = file_glob[1:] if negate else file_glob
+    target = rel_posix if "/" in pattern else name
+    matched = fnmatch.fnmatch(target, pattern)
+    return not matched if negate else matched
+
+
+def _build_search_output(
+    matches: List[str], query: str, max_results: int, truncated: bool
+) -> str:
+    """把命中行拼成最终结果文本（与 ripgrep 分支保持同一种格式）。"""
+    if not matches:
+        return f"[无结果] 未找到匹配 {query!r} 的内容。"
+    if truncated:
+        matches = matches + [f"...（已截断，最多显示 {max_results} 条）"]
+    return "\n".join(matches)
+
+
+def _python_search(
+    query: str,
+    path: str,
+    max_results: int,
+    file_glob: Optional[str],
+    context_lines: int,
+) -> str:
+    """
+    纯 Python 实现的搜索，用于没有 ripgrep 的环境（语义尽量与 rg 对齐）。
+
+    - 逐行做正则匹配，输出格式同为 `文件:行号:内容`（含 `:` 分隔的上下文行）
+    - `max_results` 是**单文件**上限，与 rg 的 --max-count 一致
+    - 空行与纯空白行不计入结果，避免"匹配到空行"这种噪音
+    """
+    try:
+        pattern = re.compile(query)
+    except re.error as e:
+        return f"[错误] 正则表达式无效: {e}"
+
+    root = Path(path)
+    if not root.exists():
+        return f"[错误] 路径不存在: {path}"
+
+    base = root if root.is_dir() else root.parent
+    matches: List[str] = []
+    truncated = False
+
+    for file_path in _iter_search_files(root):
+        try:
+            rel = file_path.relative_to(base).as_posix()
+        except ValueError:
+            rel = file_path.as_posix()
+
+        if not _match_glob(rel, file_path.name, file_glob):
+            continue
+
+        try:
+            text = file_path.read_text(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            continue  # 读不了的文件（权限、设备文件等）直接跳过
+
+        # 统一换行符，避免 Windows 上多出 \r
+        lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        file_hits = [
+            i for i, line in enumerate(lines) if line.strip() and pattern.search(line)
+        ]
+        if not file_hits:
+            continue
+
+        if len(file_hits) > max_results:
+            file_hits = file_hits[:max_results]
+            truncated = True
+
+        shown = set(file_hits)
+        if context_lines > 0:
+            for i in file_hits:
+                for j in range(max(0, i - context_lines), min(len(lines), i + context_lines + 1)):
+                    shown.add(j)
+
+        for i in sorted(shown):
+            sep = ":" if i in file_hits else "-"  # 上下文行用 '-'，与 rg 一致
+            matches.append(f"{rel}:{i + 1}{sep}{lines[i]}")
+
+    return _build_search_output(matches, query, max_results, truncated)
 
 
 def search_code(
@@ -40,12 +171,12 @@ def search_code(
     use_cache: bool = True,
 ) -> str:
     """
-    使用 ripgrep 在指定目录下搜索代码。
+    在指定目录下搜索代码：优先调用 ripgrep，找不到 rg 时退化为内置 Python 搜索。
 
     Args:
         query: 搜索关键词（支持正则）
         path: 搜索目录或文件路径，默认当前目录
-        max_results: 最多返回的结果条数
+        max_results: 单个文件最多返回的结果条数（与 rg 的 --max-count 一致）
         file_glob: 文件过滤，如 "*.py" 或 "!*.json"
         context_lines: 上下文字行数，0 表示不显示
 
@@ -61,13 +192,11 @@ def search_code(
 
     rg = _find_rg()
     if rg is None:
-        return (
-            "[错误] 未找到 ripgrep (rg)。\n"
-            "请安装：\n"
-            "  Windows: winget install BurntSushi.ripgrep.MSVC\n"
-            "  macOS:   brew install ripgrep\n"
-            "  Linux:   sudo apt install ripgrep"
-        )
+        # 没有 ripgrep 不算失败：用内置搜索顶上，保证工具在任何机器上都可用
+        final = _python_search(query, path, max_results, file_glob, context_lines)
+        if use_cache:
+            search_cache.set(final, query, path, max_results, file_glob, context_lines)
+        return final
 
     cmd = [
         rg,

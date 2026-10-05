@@ -63,11 +63,11 @@ FIM（fill-in-the-middle）接口补中间那段，再把候选代码插回文�
 
 | 依赖 | 版本要求 | 说明 |
 |---|---|---|
-| Python | 3.9 及以上 | 开发环境实测 3.12 / 3.13 |
-| ripgrep (`rg`) | 任意较新版本 | `search_code` 工具依赖它 |
+| Python | 3.9 及以上 | 开发环境实测 3.12 / 3.13，CI 覆盖 3.11 / 3.12 / 3.13 |
+| ripgrep (`rg`) | 任意较新版本 | **可选**：装上搜索更快更准，没装会自动改用内置搜索 |
 | DeepSeek API Key | — | 在 <https://platform.deepseek.com/> 申请 |
 
-安装 ripgrep：
+安装 ripgrep（可选）：
 
 ```powershell
 # Windows
@@ -78,7 +78,9 @@ brew install ripgrep
 sudo apt install ripgrep
 ```
 
-> 没装 `rg` 也不会崩：`search_code` 会返回一段带安装指引的错误文本给模型。
+> **没装 `rg` 也能正常用**：`search_code` 会退回到内置的纯 Python 搜索，输出格式与 ripgrep 完全一致
+> （`文件:行号:内容`），只是跳过 `.git`、`__pycache__`、`venv` 等目录以保速度。
+> 想强制走内置搜索来验证这条路径，设置环境变量 `CODEAGENT_FORCE_PYTHON_SEARCH=1` 即可。
 
 ---
 
@@ -309,15 +311,20 @@ print(answer)
 ```text
 CodeAgent/
 ├── main.py                 # 入口：调用 core.cli.main
-├── conftest.py             # pytest 路径配置（让 test/ 能 import core）
+├── conftest.py             # pytest 配置：路径、日志隔离、临时目录固定
 ├── pyproject.toml          # 打包与依赖声明、pytest 配置、codeagent 命令
 ├── requirements.txt        # 锁定版本的运行依赖清单（含间接依赖）
 ├── requirements-dev.txt    # 测试依赖（pytest）
 ├── .env.example            # API Key 配置模板
-├── .gitignore              # 已忽略 .env / venv2 / .agent_log / *.bak
+├── .gitignore              # 已忽略 .env / venv2 / .agent_log / *.bak / _pytest-tmp
+├── .gitattributes          # 统一按 LF 入库，避免跨平台换行噪音
+├── LICENSE                 # MIT
 ├── IncreaseDevelop.md      # 后续可扩展方向
 ├── README.md               # 本文档：安装、使用、工具与排查
 ├── Desgin.md               # 设计文档：架构、模块、取舍、局限
+│
+├── .github/workflows/
+│   └── test.yml            # CI：6 个环境 × 有/无 ripgrep 两条路径
 │
 ├── core/                   # 核心代码
 │   ├── cli.py              # 交互式 REPL：会话、命令分发、/fim
@@ -329,17 +336,19 @@ CodeAgent/
 │   ├── prompts.py          # FIM Prompt 模板（调试参考）
 │   └── ui.py               # 终端 UI（rich 面板、diff 着色、y/n 确认）
 │
-└── test/                   # 测试
-    ├── test_unit_tools.py        # 离线单测：工具层
-    ├── test_unit_agent.py        # 离线单测：Agent 循环（假 LLM）
-    ├── test_unit_cache_retry.py  # 离线单测：缓存与重试
-    ├── test_unit_fim.py          # 离线单测：FIM 补全（桩掉接口）
-    ├── test_tools.py             # 手动脚本：工具直测
-    ├── test_agent.py             # 手动脚本：真实走一遍 Agent
-    ├── test_apply_edit.py / test_insert.py / test_diff.py   # 手动脚本：边界用例
-    ├── test_confirm.py / test_log.py                        # 手动脚本：确认与日志
-    ├── test_cache.py / test_fim.py / test_api.py / test_retry.py  # 手动脚本：缓存/接口
-    └── sample.py / utils.py      # 测试用样本
+├── test/                   # 自动化测试（会被 pytest 收集、被 CI 执行）
+│   ├── test_unit_tools.py            # 离线单测：工具层
+│   ├── test_unit_search_fallback.py  # 离线单测：无 ripgrep 时的内置搜索
+│   ├── test_unit_agent.py            # 离线单测：Agent 循环（假 LLM）
+│   ├── test_unit_cache_retry.py      # 离线单测：缓存与重试
+│   └── test_unit_fim.py              # 离线单测：FIM 补全（桩掉接口）
+│
+└── scripts/manual/         # 人工观察用的脚本，不参与自动收集（见该目录 README）
+    ├── test_tools.py / test_api.py / test_retry.py       # 只读或轻量
+    ├── test_agent.py / test_fim.py / test_cache.py       # 真实调用 API
+    ├── test_insert.py / test_apply_edit.py / test_diff.py # 会改文件，要 y/n 确认
+    ├── test_confirm.py / test_log.py / check_insert.py
+    └── sample.py / utils.py / README.md
 ```
 
 > 运行时会自动生成这些文件，都已被 `.gitignore` 忽略：
@@ -351,7 +360,7 @@ CodeAgent/
 
 | 工具 | 读/写 | 参数 | 说明 |
 |---|---|---|---|
-| `search_code` | 只读 | `query`, `path`, `file_glob`, `max_results` | 用 ripgrep 搜索，返回 `文件:行号:内容` |
+| `search_code` | 只读 | `query`, `path`, `file_glob`, `max_results` | 优先用 ripgrep，没装则用内置搜索；返回 `文件:行号:内容`（`max_results` 为**单文件**上限） |
 | `read_file` | 只读 | `path`, `start_line`, `end_line` | 返回**带行号**的内容，单次最多 500 行 |
 | `insert_at_cursor` | 写 | `path`, `line`, `col`, `text` | 光标处插入（补全场景）；`line = 行数+1` 为追加到末尾 |
 | `apply_edit` | 写 | `path`, `old_code`, `new_code` | 精确替换，要求 `old_code` 唯一匹配 |
@@ -392,33 +401,46 @@ pip install -r requirements-dev.txt   # 或：pip install -e ".[dev]"
 python -m pytest                      # 配置见 pyproject.toml 的 [tool.pytest.ini_options]
 ```
 
-预期输出（36 个用例全部通过，全程不联网、不消耗 token）：
+预期输出（48 个用例全部通过，全程不联网、不消耗 token）：
 
 ```text
-....................................                                     [100%]
-36 passed in 0.73s
+................................................                 [100%]
+48 passed in 0.7s
 ```
 
 覆盖内容：
 
 - **工具层**：带行号读取、行内/行尾插入、`old_code` 不唯一与未找到、备份生成、默认拒绝覆盖；
+- **搜索**：ripgrep 路径的命中与无结果；没装 `rg` 时内置搜索的命中、行号与 `文件:行号:内容` 格式、
+  文件过滤（含 `!` 排除）、上下文行、单文件截断、非法正则与路径不存在的可读报错；
 - **Agent 循环**：用假 LLM 响应验证多步调用、空输出纠正、非法 JSON 纠正、`max_steps` 与 `max_edits` 拦截、工具异常不外抛；
 - **FIM 补全**：prefix/suffix 切分是否正确、多行补全的换行对齐、用户拒绝时不落盘、接口异常时的降级提示；
 - **缓存与重试**：缓存命中/未命中、参数不同不串味、TTL 过期、容量淘汰，以及重试成功/耗尽/不可重试异常。
 
-### 10.2 手动验证脚本（需要真实 API Key / 交互）
+### 10.2 持续集成（GitHub Actions）
+
+推送到 `main` 后会自动触发 [`.github/workflows/test.yml`](.github/workflows/test.yml)：
+
+- 在 **6 个组合**上跑测试：`ubuntu-latest` / `windows-latest` × Python `3.11` / `3.12` / `3.13`；
+- 每次跑**两遍**：先装好 ripgrep 跑一遍（验证搜索主路径），再设 `CODEAGENT_FORCE_PYTHON_SEARCH=1`
+  跑一遍（验证没装 `rg` 的兜底路径）；
+- 工作流本身**不需要 API Key**：全部用例都不发网络请求。
+
+### 10.3 手动验证脚本（需要真实 API Key / 交互）
 
 这些脚本演示真实行为，请单独运行，例如：
 
 ```powershell
-python test\test_tools.py      # 只读工具，不花钱
-python test\test_apply_edit.py # 各种边界用例
-python test\test_agent.py      # 让 Agent 真实回答一个问题
-python test\test_fim.py        # 直连 FIM 补全
+python scripts\manual\test_tools.py      # 只读工具，不花钱
+python scripts\manual\test_apply_edit.py # 各种边界用例
+python scripts\manual\test_agent.py      # 让 Agent 真实回答一个问题
+python scripts\manual\test_fim.py        # 直连 FIM 补全
 ```
 
-> 命名约定：`test_unit_*.py` 是离线单测（会被 pytest 自动收集）；
-> 其余 `test_*.py` 是手动脚本，不参与自动收集，避免 pytest 一跑就发网络请求。
+> 命名约定：`test/test_unit_*.py` 是离线单测（会被 pytest 自动收集）；
+> `scripts/manual/` 下的 `test_*.py` 是手动脚本，不参与自动收集，避免 pytest 一跑就发网络请求。
+> 为什么 CI 的 Windows 机器也没装 `rg`？GitHub 的 runner 镜像默认不带 ripgrep（只有 macOS 自带），
+> 所以工作流里显式 `apt-get install ripgrep` / `choco install ripgrep` 各装一次。
 
 ---
 
@@ -427,7 +449,7 @@ python test\test_fim.py        # 直连 FIM 补全
 | 现象 | 原因与处理 |
 |---|---|
 | 启动即报 `DEEPSEEK_API_KEY 未设置` | 没建 `.env` 或没填 Key，见[第四节](#四配置-api-key) |
-| `[错误] 未找到 ripgrep (rg)` | 没装 `rg`，见[第二节](#二环境准备)；模型会读到这段提示并改用 `read_file` |
+| `search_code` 结果比预期少 | 没装 `rg` 时走内置搜索，会跳过 `.git`、`__pycache__`、`venv` 等目录；想让结果更全就装上 ripgrep |
 | `AuthenticationError 401` | Key 无效/已吊销（错误信息里会带 Key 尾号，如 `****19f4`），或复制时多了空格 |
 | `RateLimitError` / 连接超时 | 会自动指数退避重试 3 次（终端打印 `[重试] 第 N 次失败`）；仍失败就降低调用频率 |
 | 提示 `[已达最大步数 10，强制停止]` | 任务太大或模型绕圈，拆分任务，或调大 `run_agent(max_steps=…)` |

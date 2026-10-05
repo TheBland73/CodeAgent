@@ -331,7 +331,7 @@ def execute_tool(name: str, arguments: str) -> str:
 
 | 工具 | 要点 |
 |---|---|
-| `search_code` | `shutil.which("rg")` 定位 ripgrep，找不到时返回**带安装指引**的错误文本；命令带 `--line-number --no-heading --color=never --max-count`；超时 30s；退出码 0/1 都算正常（1=无匹配）；结果同时按 `--max-count` 与 `max_results` 双层截断，并显式标注"…（已截断）" |
+| `search_code` | 两条路径：① 用 `_find_rg()`（`shutil.which("rg")`）定位 ripgrep，命令带 `--line-number --no-heading --color=never --max-count`，超时 30s，退出码 0/1 都算正常（1=无匹配），结果同时按 `--max-count` 与 `max_results` 双层截断并标注"…（已截断）"；② **找不到 rg 时退化为内置纯 Python 搜索** `_python_search()`，输出格式与 rg 路径完全一致（`文件:行号:内容`，上下文行用 `-` 分隔），遍历时跳过 `.git`/`__pycache__`/`venv` 等目录，非法正则与路径不存在都返回可读错误。两条路径的结果共用同一份缓存语义 |
 | `read_file` | 输出 `"%4d \| %s"` 形式**带行号**文本，模型才能准确说出"第几行"；支持 `start_line/end_line` 切片与 `max_lines=500` 上限，防止撑爆上下文；返回的错误信息都带上"共 N 行"这类可操作信息 |
 | `insert_at_cursor` | 1-based 行列；行号允许取 `逻辑行数+1` 表示追加到文件末尾；插入时把行尾的 `\n`/`\r\n` 单独切出来，避免把插入内容拼到换行符后面；列号越界给出"该行长度为 L，有效列号 1..L+1" |
 | `apply_edit` | `old_code` 用 `content.count()` 检查唯一性：0 次→未找到，>1 次→拒绝并建议扩大上下文；通过后才 `replace(..., 1)` |
@@ -573,6 +573,8 @@ class TTLCache:
 
 ## 12. 测试设计
 
+### 12.1 测试分层
+
 测试分两层，**自动收集只跑离线的那一层**（配置见 `pyproject.toml` 的 `[tool.pytest.ini_options]`）：
 
 | 层次 | 文件 | 是否联网 | 内容 |
@@ -581,10 +583,11 @@ class TTLCache:
 | 离线单元测试 | `test/test_unit_agent.py` | 否 | 用**假 LLM 响应**驱动循环：多步调用、空输出纠正、`max_steps` 截断、`max_edits` 拦截写操作（只读放行）、`execute_tool` 永不抛异常 |
 | 离线单元测试 | `test/test_unit_cache_retry.py` | 否 | 缓存命中/未命中、参数不同不串味、TTL 过期、容量淘汰、重试成功/耗尽/不可重试异常不重试 |
 | 离线单元测试 | `test/test_unit_fim.py` | 否 | 把 `core.llm.call_fim` 换成桩：prefix/suffix 切分是否正确、多行补全的换行对齐、空补全不改文件、位置越界拒绝、接口异常降级、用户拒绝时不落盘 |
-| 手动验证脚本 | `test/test_*.py` 其余文件 | 是 / 需交互 | 直连 API 的真实演示（`test_api.py`、`test_fim.py`、`test_cache.py`）、工具边界用例（`test_apply_edit.py`、`test_insert.py`、`test_diff.py`）、确认与日志（`test_confirm.py`、`test_log.py`） |
+| 离线单元测试 | `test/test_unit_search_fallback.py` | 否 | 把 `core.tools._find_rg` 桩成 `None`，强制走内置搜索：命中与 `文件:行号:内容` 格式、行号正确、跳过 `__pycache__` 等目录、`*.txt` 包含过滤与 `!*.txt` 排除过滤、上下文行用 `-`、单文件截断、非法正则与路径不存在的可读报错、单文件路径搜索 |
+| 手动验证脚本 | `scripts/manual/*.py` | 是 / 需交互 | 直连 API 的真实演示（`test_api.py`、`test_fim.py`、`test_cache.py`）、工具边界用例（`test_apply_edit.py`、`test_insert.py`、`test_diff.py`）、确认与日志（`test_confirm.py`、`test_log.py`） |
 
-当前规模：**36 个用例，全部离线，单次运行不到 1 秒**（实测 `python -m pytest -q` → `36 passed`；
-分布：工具层 13、Agent 循环 7、缓存与重试 8、FIM 补全 8）。
+当前规模：**48 个用例，全部离线，单次运行不到 1 秒**（实测 `python -m pytest -q` → `48 passed`；
+分布：工具层 13、搜索兜底 12、Agent 循环 7、缓存与重试 8、FIM 补全 8）。
 
 关键测试技巧：
 
@@ -592,12 +595,29 @@ class TTLCache:
   从而在不发请求的前提下验证所有分支（含异常分支）；
 - **时间伪造**：TTL 测试里把 `core.cache.time.time` 换成 `lambda: real() + 11`，
   不必真的 `sleep` 10 分钟；
+- **能力伪造**：搜索兜底测试把 `core.tools._find_rg` 换成 `lambda: None`，
+  不依赖本机是否装了 ripgrep，也不靠改 `PATH`；
 - **不污染仓库**：所有文件操作都在 pytest 的 `tmp_path` 里进行；
 - **命名隔离**：离线测试统一叫 `test_unit_*.py`，手动脚本叫 `test_*.py`，
   前者被自动收集，后者不会被误跑（否则 `pytest` 一执行就会打网络请求）。
 
 另有 `conftest.py` 负责把仓库根目录加入 `sys.path`，
 因此在任何工作目录下执行 `python -m pytest` 都能正确 `import core`。
+
+### 12.2 持续集成
+
+`.github/workflows/test.yml` 在每次 push / PR 到 main 时运行，矩阵为
+`ubuntu-latest` / `windows-latest` × Python `3.11` / `3.12` / `3.13`，共 6 个 job，各自独立的"干净机器"：
+
+1. 先 `apt-get install ripgrep`（Linux）或 `choco install ripgrep`（Windows）把 ripgrep 装上，
+   跑一遍 `python -m pytest -q` —— 验证**搜索主路径**；
+2. 再设 `CODEAGENT_FORCE_PYTHON_SEARCH=1` 跑第二遍 —— 验证**没有 ripgrep 时的兜底路径**。
+
+两条都设 `PYTHONIOENCODING=utf-8`，避免 Windows runner 上中文输出被本地编码干扰。
+CI 全程不注入 API Key：所有用例都不发网络请求。这个工作流的意义在于，
+它把"在我机器上能跑"变成"在一台什么都不装的机器上也能跑"——
+最初的失败正是因为 GitHub runner 默认不带 ripgrep（只有 macOS 自带），
+暴露出 `search_code` 对系统命令的硬依赖，才有了上面的兜底实现。
 
 ---
 
@@ -612,7 +632,8 @@ class TTLCache:
 5. **单轮改数偏少**：`max_edits=3` 对"大改造"任务可能不够，需要用户重发任务；
 6. **无并发**：工具串行执行；模型一次给多个工具调用时也是一个一个跑；
 7. **FIM 补全无语法校验**：补出来的代码语法是否正确、缩进风格是否匹配，目前完全依赖模型输出质量；
-8. **测试未纳入 CI**：没有 GitHub Actions 之类的自动化流水线。
+8. **内置搜索不如 ripgrep**：兜底路径没有正则引擎优化、没有 `.gitignore` 感知，
+   大仓库下明显更慢，只适合中小项目（装上 `rg` 即走主路径）。
 
 ### 13.2 演进路线（与 `IncreaseDevelop.md` 对齐）
 

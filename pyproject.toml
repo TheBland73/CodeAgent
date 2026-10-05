@@ -31,3 +31,5 @@ include = ["core*", "test*"]
 python_files = ["test_unit_*.py"]
 testpaths = ["test"]
 addopts = "-q"
+# 把缓存目录固定到仓库内（已被 .gitignore 以 _pytest-tmp/ 整体忽略）
+cache_dir = "_pytest-tmp/.pytest_cache"
