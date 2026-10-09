@@ -132,6 +132,12 @@ Copy-Item .env.example .env
 DEEPSEEK_API_KEY=sk-your-deepseek-api-key-here
 ```
 
+> ⚠️ **`.env` 已被 `.gitignore` 忽略，请不要提交或截图外发。**
+> 如果 Key 泄漏，去平台后台吊销并重新生成。
+> 如果没配置 Key，程序会在启动时直接报 `DEEPSEEK_API_KEY 未设置，请检查 .env 文件。`，不会带着空 Key 去请求。
+
+可选：想换模型或端点，改 `core/config.py` 里的 `DEFAULT_MODEL`（默认 `deepseek-flash`）和 `DEEPSEEK_BASE_URL`。
+
 ---
 
 ## 五、使用方法
