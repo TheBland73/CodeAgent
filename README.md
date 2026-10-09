@@ -318,8 +318,10 @@ print(answer)
 一段不到 1 分钟的实操演示（约 5 MB），从启动到 Agent 自主调查、看到 diff、确认落盘：
 
 - **在线播放**：[docs/demo-video.mp4](https://github.com/TheBland73/CodeAgent/blob/main/docs/demo-video.mp4) —— 点击后在 GitHub 页面内直接播放，无需下载
-- **直接下载**：[demo-video.mp4](https://github.com/TheBland73/CodeAgent/raw/main/docs/demo-video.mp4)
-- 仓库内路径：`docs/demo-video.mp4`
+- **直接下载（Releases）**：[Releases v1.0](https://github.com/TheBland73/CodeAgent/releases/tag/v1.0) 里的 `demo-video.mp4`，或[点此直链下载](https://github.com/TheBland73/CodeAgent/releases/download/v1.0/demo-video.mp4)
+- **仓库内路径**：`docs/demo-video.mp4`
+
+> 仓库里放一份是为了 clone 下来也能离线观看；Releases 里放一份是为了不想拉取仓库的人能直接下载。
 
 ---
 
