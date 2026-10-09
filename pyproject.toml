@@ -7,7 +7,7 @@ name = "codeagent"
 version = "0.1.0"
 description = "基于 DeepSeek 的 CLI 代码补全 Agent（Agent 循环 + 工具调用 + 人工确认）"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "openai>=3.0",
     "python-dotenv>=1.0",

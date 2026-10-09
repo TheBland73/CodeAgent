@@ -5,7 +5,7 @@
 
 [![tests](https://github.com/TheBland73/CodeAgent/workflows/tests/badge.svg)](https://github.com/TheBland73/CodeAgent/actions/workflows/test.yml)
 
-作者：TheBland ｜ 语言：Python 3.9+ ｜ 交互方式：命令行（CLI）
+作者：TheBland ｜ 语言：Python 3.11+ ｜ 交互方式：命令行（CLI）
 
 ---
 
@@ -16,14 +16,15 @@
 - [三、安装](#三安装)
 - [四、配置 API Key](#四配置-api-key)
 - [五、使用方法](#五使用方法)
-- [六、命令与参数速查](#六命令与参数速查)
-- [七、项目结构](#七项目结构)
-- [八、工具清单](#八工具清单)
-- [九、安全机制](#九安全机制)
-- [十、测试](#十测试)
-- [十一、常见问题排查](#十一常见问题排查)
-- [十二、已知限制](#十二已知限制)
-- [十三、后续可扩展方向](#十三后续可扩展方向)
+- [六、演示视频](#六演示视频)
+- [七、命令与参数速查](#七命令与参数速查)
+- [八、项目结构](#八项目结构)
+- [九、工具清单](#九工具清单)
+- [十、安全机制](#十安全机制)
+- [十一、测试](#十一测试)
+- [十二、常见问题排查](#十二常见问题排查)
+- [十三、已知限制](#十三已知限制)
+- [十四、后续可扩展方向](#十四后续可扩展方向)
 
 ---
 
@@ -65,7 +66,7 @@ FIM（fill-in-the-middle）接口补中间那段，再把候选代码插回文�
 
 | 依赖 | 版本要求 | 说明 |
 |---|---|---|
-| Python | 3.9 及以上 | 开发环境实测 3.12 / 3.13，CI 覆盖 3.11 / 3.12 / 3.13 |
+| Python | 3.11 及以上 | 开发环境实测 3.13，CI 覆盖 3.11 / 3.12 / 3.13（语法用到了 3.10+ 的联合类型，3.9 及以下跑不起来） |
 | ripgrep (`rg`) | 任意较新版本 | **可选**：装上搜索更快更准，没装会自动改用内置搜索 |
 | DeepSeek API Key | — | 在 <https://platform.deepseek.com/> 申请 |
 
@@ -137,6 +138,37 @@ DEEPSEEK_API_KEY=sk-your-deepseek-api-key-here
 > 如果没配置 Key，程序会在启动时直接报 `DEEPSEEK_API_KEY 未设置，请检查 .env 文件。`，不会带着空 Key 去请求。
 
 可选：想换模型或端点，改 `core/config.py` 里的 `DEFAULT_MODEL`（默认 `deepseek-flash`）和 `DEEPSEEK_BASE_URL`。
+
+### 4.1 在占位 Key 与真实 Key 之间切换
+
+仓库里有两个"看起来像 Key"的东西，别搞混：
+
+| 位置 | 值 | 作用 |
+|---|---|---|
+| `.env.example`（入库） | `sk-your-deepseek-api-key-here` | **模板**，只是告诉你要填什么 |
+| `conftest.py`（入库） | `sk-test-placeholder-not-a-real-key` | **测试用占位值**，只为骗过导入时的存在性校验 |
+| `.env`（**不入库**） | 你自己的真 Key | 真正发请求时用 |
+
+**只跑离线测试** → 什么都不用配。就算没有 `.env`，`conftest.py` 会补一个假 Key，
+测试全程不发网络请求，48 个用例照样全绿。
+
+**要真的用起来**（`python main.py` 或 `/fim`）→ 必须配真 Key：
+
+```powershell
+Copy-Item .env.example .env
+notepad .env          # 把 DEEPSEEK_API_KEY 换成 https://platform.deepseek.com/ 申请到的真 Key
+python main.py
+```
+
+**验证你配的 Key 是不是真的生效了**，有两个信号：
+
+- ✅ 能正常对话、Agent 能调工具 → Key 有效
+- ❌ 报错里出现 `401` / `Authentication Fails` / `Your api key: ****xxxx is invalid`
+  → 这个 Key 无效或已过期（报错里那个 `****xxxx` 是 Key 的**尾号**，可以用来核对你填的是哪一把）
+
+> 小技巧：`core/config.py` 只校验"Key 存不存在"，不校验"Key 对不对"，
+> 所以假 Key 也能顺利启动，直到第一次真正请求才由 DeepSeek 返回 401。
+> 这正好可以拿来做自检——想确认代理、网络、模型名这条链路通不通，看返回的是 401 还是超时就能分辨。
 
 ---
 
@@ -281,7 +313,17 @@ print(answer)
 
 ---
 
-## 六、命令与参数速查
+## 六、演示视频
+
+一段不到 1 分钟的实操演示（约 5 MB），从启动到 Agent 自主调查、看到 diff、确认落盘：
+
+- **在线播放**：[docs/demo-video.mp4](https://github.com/TheBland73/CodeAgent/blob/main/docs/demo-video.mp4) —— 点击后在 GitHub 页面内直接播放，无需下载
+- **直接下载**：[demo-video.mp4](https://github.com/TheBland73/CodeAgent/raw/main/docs/demo-video.mp4)
+- 仓库内路径：`docs/demo-video.mp4`
+
+---
+
+## 七、命令与参数速查
 
 ### CLI 命令
 
@@ -308,12 +350,12 @@ print(answer)
 
 ---
 
-## 七、项目结构
+## 八、项目结构
 
 ```text
 CodeAgent/
 ├── main.py                 # 入口：调用 core.cli.main
-├── conftest.py             # pytest 配置：路径、日志隔离、临时目录固定
+├── conftest.py             # pytest 配置：路径、占位 Key、日志隔离、临时目录固定
 ├── pyproject.toml          # 打包与依赖声明、pytest 配置、codeagent 命令
 ├── requirements.txt        # 锁定版本的运行依赖清单（含间接依赖）
 ├── requirements-dev.txt    # 测试依赖（pytest）
@@ -321,6 +363,8 @@ CodeAgent/
 ├── .gitignore              # 已忽略 .env / venv2 / .agent_log / *.bak / _pytest-tmp
 ├── .gitattributes          # 统一按 LF 入库，避免跨平台换行噪音
 ├── LICENSE                 # MIT
+├── docs/
+│   └── demo-video.mp4      # 演示视频（不到 1 分钟）
 ├── IncreaseDevelop.md      # 后续可扩展方向
 ├── README.md               # 本文档：安装、使用、工具与排查
 ├── Desgin.md               # 设计文档：架构、模块、取舍、局限
@@ -358,7 +402,7 @@ CodeAgent/
 
 ---
 
-## 八、工具清单
+## 九、工具清单
 
 | 工具 | 读/写 | 参数 | 说明 |
 |---|---|---|---|
@@ -372,7 +416,7 @@ CodeAgent/
 
 ---
 
-## 九、安全机制
+## 十、安全机制
 
 这是本项目与"让模型直接写文件"最大的区别，四道闸门：
 
@@ -393,7 +437,7 @@ CodeAgent/
 
 ---
 
-## 十、测试
+## 十一、测试
 
 ### 10.1 离线单元测试（推荐，不需要 API Key）
 
@@ -446,7 +490,7 @@ python scripts\manual\test_fim.py        # 直连 FIM 补全
 
 ---
 
-## 十一、常见问题排查
+## 十二、常见问题排查
 
 | 现象 | 原因与处理 |
 |---|---|
@@ -462,7 +506,7 @@ python scripts\manual\test_fim.py        # 直连 FIM 补全
 
 ---
 
-## 十二、已知限制
+## 十三、已知限制
 
 - 不是编辑器内联补全，没有 VS Code 插件，也没有大规模代码索引；
 - 没有流式输出与多候选建议（`call_chat` 的 `stream=True` 目前只是占位，未实现）；
@@ -473,7 +517,7 @@ python scripts\manual\test_fim.py        # 直连 FIM 补全
 
 ---
 
-## 十三、后续可扩展方向
+## 十四、后续可扩展方向
 
 详见 [IncreaseDevelop.md](IncreaseDevelop.md)，优先级从高到低：
 

@@ -601,8 +601,15 @@ class TTLCache:
 - **命名隔离**：离线测试统一叫 `test_unit_*.py`，手动脚本叫 `test_*.py`，
   前者被自动收集，后者不会被误跑（否则 `pytest` 一执行就会打网络请求）。
 
-另有 `conftest.py` 负责把仓库根目录加入 `sys.path`，
-因此在任何工作目录下执行 `python -m pytest` 都能正确 `import core`。
+`conftest.py` 承担四件事：
+
+1. 把仓库根目录加入 `sys.path`，因此在任何工作目录下执行 `python -m pytest` 都能正确 `import core`；
+2. **在 `import core.*` 之前注入占位 API Key**，见 12.3；
+3. 把 `core.tools` 的写盘日志重定向到 `_pytest-tmp/.agent-log/`，测试不会在仓库的
+   `.agent_log/` 里留下记录（日志是运行产物，不该由测试产生）；
+4. 把 pytest 的 `basetemp` 钉在仓库内的 `_pytest-tmp/basetemp`。某些环境下子进程解析出的
+   系统临时目录不可写，pytest 会退回"当前目录/pytest-of-<用户名>"，在项目里留下一堆垃圾。
+   （`basetemp` 不是 `pyproject.toml` 的合法选项，所以只能写在 `pytest_configure` 钩子里。）
 
 ### 12.2 持续集成
 
@@ -614,10 +621,40 @@ class TTLCache:
 2. 再设 `CODEAGENT_FORCE_PYTHON_SEARCH=1` 跑第二遍 —— 验证**没有 ripgrep 时的兜底路径**。
 
 两条都设 `PYTHONIOENCODING=utf-8`，避免 Windows runner 上中文输出被本地编码干扰。
-CI 全程不注入 API Key：所有用例都不发网络请求。这个工作流的意义在于，
-它把"在我机器上能跑"变成"在一台什么都不装的机器上也能跑"——
-最初的失败正是因为 GitHub runner 默认不带 ripgrep（只有 macOS 自带），
-暴露出 `search_code` 对系统命令的硬依赖，才有了上面的兜底实现。
+CI 全程**不注入真实 API Key**：所有用例都不发网络请求。
+真正需要 Key 的只有 `core/config.py` 在导入时的"存在性校验"，
+所以由 `conftest.py` 补一个假值（`sk-test-placeholder-not-a-real-key`）让它通过，见 12.3。
+这个工作流的意义在于，它把"在我机器上能跑"变成"在一台什么都不装的机器上也能跑"——
+最初的两次失败正好各暴露了一个隐藏依赖：第一次是 GitHub runner 默认不带 ripgrep
+（只有 macOS 自带），暴露出 `search_code` 对系统命令的硬依赖，才有了兜底实现；
+第二次是本地工作区里躺着一个 `.env` 掩盖了"导入即抛异常"的问题，才有了占位 Key。
+
+### 12.3 为什么需要占位 API Key
+
+`core/config.py` 在**模块导入时**就校验 `DEEPSEEK_API_KEY`，没有就直接抛 `ValueError`。
+这是"尽早失败"的设计——用户漏配 `.env` 时立刻得到明确提示，而不是等到第一次请求才报 401。
+但它在 CI 里撞出一个问题：**仓库里没有 `.env`**（本来就被 `.gitignore` 排除），
+于是 `core.llm → core.config` 这条导入链一碰就炸，
+`test_unit_agent.py` / `test_unit_cache_retry.py` / `test_unit_fim.py`
+在**收集阶段**就报错，整轮 pytest 以退出码 2 中断。
+
+本机之所以一直绿，纯粹因为工作区里躺着一个有效的 `.env`——
+**测试结果依赖了"跑测试的机器上恰好有什么文件"，这是最隐蔽的一类环境依赖。**
+
+解决办法是在 `conftest.py` 里、`import core.*` **之前**注入占位值：
+
+```python
+os.environ.setdefault("DEEPSEEK_API_KEY", "sk-test-placeholder-not-a-real-key")
+```
+
+三个设计要点：
+
+- **用 `setdefault` 而不是直接赋值**：本地有真实 `.env` 时不会被覆盖，开发时仍能用真 Key 跑；
+- **只能是占位值**：任何真实 Key 都不许进版本库，自然也不许进 CI；
+- **它只骗过"存在性校验"**：所有用例都不发请求，所以假 Key 不会导致任何网络失败。
+
+配套的边界要划清：**离线测试不需要真实 Key；`python main.py` 与 `/fim` 必须配真 Key。**
+把假 Key 换成真 Key 的步骤见 README 第四节。
 
 ---
 
