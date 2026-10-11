@@ -25,6 +25,7 @@
 - [十二、常见问题排查](#十二常见问题排查)
 - [十三、已知限制](#十三已知限制)
 - [十四、后续可扩展方向](#十四后续可扩展方向)
+- [十五、维护者笔记（使用者可跳过）](#十五维护者笔记使用者可跳过)
 
 ---
 
@@ -52,13 +53,13 @@ FIM（fill-in-the-middle）接口补中间那段，再把候选代码插回文�
 
 | 能力 | 说明 |
 |---|---|
-| Agent 循环 | 多轮工具调用与结果回填（`core/agent.py`） |
-| 工具集成 | 5 个工具，Function Calling 驱动（`core/tools.py`） |
-| 上下文记忆 | 会话级 `messages` 数组，`/clear` 可重置（`core/cli.py`） |
-| 错误处理 | 网络异常指数退避重试、工具异常转文本、空输出/非法 JSON 自动纠正 |
-| 结果缓存 | FIM 与搜索结果带 TTL + 容量上限的内存缓存（`core/cache.py`） |
-| 可审计 | 每次写盘留 `.bak` 备份 + `.agent_log/edit.log` JSONL 日志 |
-| 人机确认 | 写盘前打印 diff，`y` 才执行（`core/ui.py`） |
+| Agent 循环 | 多轮工具调用与结果回填：它自己决定下一步做什么，而不是一次性生成 |
+| 工具集成 | 5 个工具（2 个只读 + 3 个可写），由模型的 Function Calling 驱动 |
+| 上下文记忆 | 同一会话内记得前面聊过什么，`/clear` 可随时重置 |
+| 错误处理 | 网络异常自动退避重试，工具出错转成文字回传，空输出/非法 JSON 自动纠正 |
+| 结果缓存 | 相同请求不重复花钱：FIM 与搜索结果带过期时间的内存缓存 |
+| 可审计 | 每次写盘都留 `.bak` 备份和一份 JSONL 日志，随时能查、能回滚 |
+| 人机确认 | 写盘前先把 diff 打给你看，输 `y` 才真正执行 |
 
 ---
 
@@ -81,9 +82,9 @@ brew install ripgrep
 sudo apt install ripgrep
 ```
 
-> **没装 `rg` 也能正常用**：`search_code` 会退回到内置的纯 Python 搜索，输出格式与 ripgrep 完全一致
-> （`文件:行号:内容`），只是跳过 `.git`、`__pycache__`、`venv` 等目录以保速度。
-> 想强制走内置搜索来验证这条路径，设置环境变量 `CODEAGENT_FORCE_PYTHON_SEARCH=1` 即可。
+> **没装 `rg` 也能正常用**：搜索会自动改用内置方式，结果格式与装好 ripgrep 时完全一致
+> （`文件:行号:内容`），只是会跳过 `.git`、`__pycache__`、`venv` 这类目录以保速度。
+> 搜到的结果比预期少，多半就是这个原因。
 
 ---
 
@@ -117,58 +118,42 @@ pip install -e ".[dev]"              # 方式三：顺带装上 pytest，方便�
 
 ## 四、配置 API Key
 
-项目从**项目根目录的 `.env`** 读取 Key（`core/config.py` 里写死了这个路径，不用管当前工作目录）。
+程序从一个叫 `.env` 的配置文件里读 Key —— 它放在**项目根目录**，不管你从哪个目录启动程序都能找到。
 
 ```powershell
-# 复制模板
+# 1) 从模板复制一份
 Copy-Item .env.example .env
 
-# 编辑 .env，填入你自己的 Key
-# DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# 2) 编辑它，把示例值换成你自己的真 Key
+notepad .env
 ```
 
-`.env.example` 内容：
+`.env` 里要填的就一行（去 <https://platform.deepseek.com/> 注册后可以创建）：
 
 ```ini
-DEEPSEEK_API_KEY=sk-your-deepseek-api-key-here
+DEEPSEEK_API_KEY=sk-你的真实Key
 ```
 
-> ⚠️ **`.env` 已被 `.gitignore` 忽略，请不要提交或截图外发。**
-> 如果 Key 泄漏，去平台后台吊销并重新生成。
-> 如果没配置 Key，程序会在启动时直接报 `DEEPSEEK_API_KEY 未设置，请检查 .env 文件。`，不会带着空 Key 去请求。
+> 💡 **还没申请 Key 也能先跑跑看** —— 程序能正常启动，只是第一次向模型提问时会提示 Key 无效。
 
-可选：想换模型或端点，改 `core/config.py` 里的 `DEFAULT_MODEL`（默认 `deepseek-flash`）和 `DEEPSEEK_BASE_URL`。
-
-### 4.1 在占位 Key 与真实 Key 之间切换
-
-仓库里有两个"看起来像 Key"的东西，别搞混：
-
-| 位置 | 值 | 作用 |
-|---|---|---|
-| `.env.example`（入库） | `sk-your-deepseek-api-key-here` | **模板**，只是告诉你要填什么 |
-| `conftest.py`（入库） | `sk-test-placeholder-not-a-real-key` | **测试用占位值**，只为骗过导入时的存在性校验 |
-| `.env`（**不入库**） | 你自己的真 Key | 真正发请求时用 |
-
-**只跑离线测试** → 什么都不用配。就算没有 `.env`，`conftest.py` 会补一个假 Key，
-测试全程不发网络请求，48 个用例照样全绿。
-
-**要真的用起来**（`python main.py` 或 `/fim`）→ 必须配真 Key：
+### 4.1 只想验证代码能跑？不需要 Key
 
 ```powershell
-Copy-Item .env.example .env
-notepad .env          # 把 DEEPSEEK_API_KEY 换成 https://platform.deepseek.com/ 申请到的真 Key
-python main.py
+python -m pytest
 ```
 
-**验证你配的 Key 是不是真的生效了**，有两个信号：
+48 个用例全程离线执行，不发任何网络请求，也不消耗 token。
+
+### 4.2 怎么确认 Key 真的生效了
+
+两个信号：
 
 - ✅ 能正常对话、Agent 能调工具 → Key 有效
 - ❌ 报错里出现 `401` / `Authentication Fails` / `Your api key: ****xxxx is invalid`
-  → 这个 Key 无效或已过期（报错里那个 `****xxxx` 是 Key 的**尾号**，可以用来核对你填的是哪一把）
+  → 这个 Key 无效或已过期（`****xxxx` 是 Key 的**尾号**，可以用来核对报错的是哪一把）
 
-> 小技巧：`core/config.py` 只校验"Key 存不存在"，不校验"Key 对不对"，
-> 所以假 Key 也能顺利启动，直到第一次真正请求才由 DeepSeek 返回 401。
-> 这正好可以拿来做自检——想确认代理、网络、模型名这条链路通不通，看返回的是 401 还是超时就能分辨。
+如果你用的是假 Key，程序启动时不会报错，直到第一次真正提问才会由 DeepSeek 返回 401 ——
+看到这个 401，反而说明网络、端点、模型名这条链路是通的。
 
 ---
 
@@ -321,7 +306,7 @@ print(answer)
 - **直接下载（Releases）**：[Releases v1.0](https://github.com/TheBland73/CodeAgent/releases/tag/v1.0) 里的 `demo-video.mp4`，或[点此直链下载](https://github.com/TheBland73/CodeAgent/releases/download/v1.0/demo-video.mp4)
 - **仓库内路径**：`docs/demo-video.mp4`
 
-> 仓库里放一份是为了 clone 下来也能离线观看；Releases 里放一份是为了不想拉取仓库的人能直接下载。
+> 两种方式内容完全相同，任选一种即可：想直接看就点上面的在线播放，不想拉取整个仓库就点 Releases 下载。
 
 ---
 
@@ -357,12 +342,12 @@ print(answer)
 ```text
 CodeAgent/
 ├── main.py                 # 入口：调用 core.cli.main
-├── conftest.py             # pytest 配置：路径、占位 Key、日志隔离、临时目录固定
+├── conftest.py             # pytest 配置：日志与临时目录隔离
 ├── pyproject.toml          # 打包与依赖声明、pytest 配置、codeagent 命令
 ├── requirements.txt        # 锁定版本的运行依赖清单（含间接依赖）
 ├── requirements-dev.txt    # 测试依赖（pytest）
 ├── .env.example            # API Key 配置模板
-├── .gitignore              # 已忽略 .env / venv2 / .agent_log / *.bak / _pytest-tmp
+├── .gitignore              # 说明哪些文件不必入库
 ├── .gitattributes          # 统一按 LF 入库，避免跨平台换行噪音
 ├── LICENSE                 # MIT
 ├── docs/
@@ -399,8 +384,8 @@ CodeAgent/
     └── sample.py / utils.py / README.md
 ```
 
-> 运行时会自动生成这些文件，都已被 `.gitignore` 忽略：
-> `.agent_log/edit.log`（写盘日志）、`*.bak`（备份）、`__pycache__/`。
+> 上面这些运行时会自动生成的东西（日志、备份、缓存）都不需要你手动管理，
+> 也不会被提交进版本库：`.agent_log/edit.log`（写盘日志）、`*.bak`（备份）、`__pycache__/`。
 
 ---
 
@@ -422,8 +407,8 @@ CodeAgent/
 
 这是本项目与"让模型直接写文件"最大的区别，四道闸门：
 
-1. **人机确认**：所有写操作先把 diff 打给你看，输 `y` 才继续；`n` / 回车 → 取消（`core/ui.py::ask_confirm`）。
-2. **自动备份**：覆盖已有文件前先存 `xxx.py.bak`，随时可回滚（`core/tools.py::_make_backup`）。
+1. **人机确认**：所有写操作先把 diff 打给你看，输 `y` 才继续；`n` / 回车 → 取消。
+2. **自动备份**：覆盖已有文件前先存 `xxx.py.bak`，随时可回滚。
 3. **唯一匹配**：`apply_edit` 要求 `old_code` 唯一，避免"想改 A 结果改了 B"。
 4. **默认不覆盖**：`write_file` 对已存在的文件默认拒绝，必须显式 `overwrite=True`。
 
@@ -441,12 +426,12 @@ CodeAgent/
 
 ## 十一、测试
 
-### 10.1 离线单元测试（推荐，不需要 API Key）
+### 11.1 离线单元测试（推荐，不需要 API Key）
 
 ```powershell
 .\venv2\Scripts\Activate.ps1
 pip install -r requirements-dev.txt   # 或：pip install -e ".[dev]"
-python -m pytest                      # 配置见 pyproject.toml 的 [tool.pytest.ini_options]
+python -m pytest
 ```
 
 预期输出（48 个用例全部通过，全程不联网、不消耗 token）：
@@ -465,16 +450,15 @@ python -m pytest                      # 配置见 pyproject.toml 的 [tool.pytes
 - **FIM 补全**：prefix/suffix 切分是否正确、多行补全的换行对齐、用户拒绝时不落盘、接口异常时的降级提示；
 - **缓存与重试**：缓存命中/未命中、参数不同不串味、TTL 过期、容量淘汰，以及重试成功/耗尽/不可重试异常。
 
-### 10.2 持续集成（GitHub Actions）
+### 11.2 持续集成（GitHub Actions）
 
 推送到 `main` 后会自动触发 [`.github/workflows/test.yml`](.github/workflows/test.yml)：
 
 - 在 **6 个组合**上跑测试：`ubuntu-latest` / `windows-latest` × Python `3.11` / `3.12` / `3.13`；
-- 每次跑**两遍**：先装好 ripgrep 跑一遍（验证搜索主路径），再设 `CODEAGENT_FORCE_PYTHON_SEARCH=1`
-  跑一遍（验证没装 `rg` 的兜底路径）；
-- 工作流本身**不需要 API Key**：全部用例都不发网络请求。
+- 每次跑**两遍**：先装好 ripgrep 跑一遍（验证搜索主路径），再模拟"没装 ripgrep"跑一遍（验证兜底路径）；
+- 工作流本身**不需要你配任何 Key**：全部用例都不发网络请求。
 
-### 10.3 手动验证脚本（需要真实 API Key / 交互）
+### 11.3 手动验证脚本（需要真实 API Key / 交互）
 
 这些脚本演示真实行为，请单独运行，例如：
 
@@ -487,8 +471,6 @@ python scripts\manual\test_fim.py        # 直连 FIM 补全
 
 > 命名约定：`test/test_unit_*.py` 是离线单测（会被 pytest 自动收集）；
 > `scripts/manual/` 下的 `test_*.py` 是手动脚本，不参与自动收集，避免 pytest 一跑就发网络请求。
-> 为什么 CI 的 Windows 机器也没装 `rg`？GitHub 的 runner 镜像默认不带 ripgrep（只有 macOS 自带），
-> 所以工作流里显式 `apt-get install ripgrep` / `choco install ripgrep` 各装一次。
 
 ---
 
@@ -528,6 +510,29 @@ python scripts\manual\test_fim.py        # 直连 FIM 补全
 3. 流式输出 + 多候选补全，配合编辑器插件做内联补全；
 4. 增加"跑测试验证改动"的工具，形成 改 → 验 → 修的闭环；
 5. 会话持久化与 `--yes` 非交互模式（CI 里批量用）。
+
+---
+
+## 十五、维护者笔记（使用者可跳过）
+
+这一节记录的都是**改代码 / 维护仓库时才需要知道**的事，普通使用可以完全忽略。
+
+**关于密钥与配置**
+
+- `.env` 已被 `.gitignore` 忽略，**请不要提交、不要截图外发**；一旦泄漏，去 DeepSeek 后台吊销并重新生成。
+- 想换模型或端点：改 `core/config.py` 里的 `DEFAULT_MODEL`（默认 `deepseek-flash`）和 `DEEPSEEK_BASE_URL`。
+- `core/config.py` 只校验"Key 存不存在"，不校验"Key 对不对"，这是"尽早失败"的设计：
+  启动阶段没有 `.env` 就直接报 `DEEPSEEK_API_KEY 未设置`，避免带着空 Key 去发请求。
+
+**关于测试与 CI**
+
+- `conftest.py` 会注入一个占位 Key（`sk-test-placeholder-not-a-real-key`）：它写在 `import core.*` **之前**，
+  只为骗过导入时的存在性校验，不参与任何网络请求。用 `os.environ.setdefault(...)` 实现，
+  所以本机有真实 `.env` 时不会被覆盖。
+- 为什么 CI 的 Windows / Ubuntu 机器还要装 ripgrep？GitHub 的 runner 镜像默认不带（只有 macOS 自带），
+  所以工作流里显式 `apt-get install ripgrep` / `choco install ripgrep` 各装一次，
+  再用 `CODEAGENT_FORCE_PYTHON_SEARCH=1` 强制走内置搜索跑第二遍，两条路径都验证。
+- 想在本机手动验证兜底搜索路径，同样设 `$env:CODEAGENT_FORCE_PYTHON_SEARCH="1"` 即可。
 
 ---
 
