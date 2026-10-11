@@ -303,7 +303,7 @@ print(answer)
 一段不到 1 分钟的实操演示（约 5 MB），从启动到 Agent 自主调查、看到 diff、确认落盘：
 
 - **在线播放**：[docs/demo-video.mp4](https://github.com/TheBland73/CodeAgent/blob/main/docs/demo-video.mp4) —— 点击后在 GitHub 页面内直接播放，无需下载
-- **直接下载（Releases）**：[Releases v1.0](https://github.com/TheBland73/CodeAgent/releases/tag/v1.0) 里的 `demo-video.mp4`，或[点此直链下载](https://github.com/TheBland73/CodeAgent/releases/download/v1.0/demo-video.mp4)
+- **直接下载（Releases）**：[Releases ca-v1.0.0](https://github.com/TheBland73/CodeAgent/releases/tag/ca-v1.0.0) 里的 `demo-video.mp4`，或[点此直链下载](https://github.com/TheBland73/CodeAgent/releases/download/ca-v1.0.0/demo-video.mp4)
 - **仓库内路径**：`docs/demo-video.mp4`
 
 > 两种方式内容完全相同，任选一种即可：想直接看就点上面的在线播放，不想拉取整个仓库就点 Releases 下载。
